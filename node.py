@@ -130,6 +130,7 @@ class Node(threading.Thread):
         self.port_to_coord = None
         self.status = 'idle'
         self.recd_reply = {}
+
         self._expected_number_of_responses = len(self._ports)
 
     def _heartbeat(self):
@@ -140,74 +141,66 @@ class Node(threading.Thread):
             self._con.send(node_id, dict(type="ping"))
 
     def _on_reconfig(self, node_list, frag_id, from_id):
-        '''
         sender_id = node_list[-1]
         if self.status == 'idle':
-            if self.id in node_list:
-                return
-            if len(self.ports) == 1:
-                self.get_node(sender_id).no_contention(self.id)
+            if len(self._ports) == 1:
+                self._con.send(sender_id, dict(type='no_contention'))
             self.coord_so_far = frag_id
             self.status = 'wait'
             self.port_to_coord = self.port_to(sender_id)
-            for port in set(self.ports.keys()).difference([self.port_to(sender_id)]):
-                self.get_node(self.ports[port]).reconfig(node_list + [self.id], frag_id)
+            for port in set(self._ports.keys()).difference([self.port_to(sender_id)]):
+                self._con.send(self._ports[port], dict(type='reconfig',
+                                                       node_list=node_list+[self.id],
+                                                       frag_id=frag_id))
         elif self.status == 'wait':
             e = self.port_to(sender_id)
             print(sender_id)
             print(e, '-', self.id)
             if self.id in node_list:
-                self.get_node(self.ports[e]).no_contention(self.id)
+                self._con.send(self._ports[e], dict(type='no_contention'))
                 return
 
             if (frag_id == self.coord_so_far) and (e not in self.get_port()):
-                self.get_node(self.ports[e]).no_contention(self.id)
+                self._con.send(self._ports[e], dict(type='no_contention'))
                 return
 
             # Resolve contention
             if (self.coord_so_far > frag_id) or ((self.coord_so_far == frag_id) and (self.id > sender_id)):
-                self.get_node(sender_id).stop(self.coord_so_far, from_id=self.id)
+                self._con.send(sender_id, dict(type='stop', frag_id=self.coord_so_far))
             else:
                 self.coord_so_far = frag_id
-                self.get_node(self.ports[self.port_to_coord]).stop(frag_id, from_id=self.id)
+                self._con.send(self._ports[self.port_to_coord], dict(type='stop', frag_id=frag_id))
                 self.port_to_coord = self.port_to(sender_id)
-        '''
-
 
     def _on_stop(self, frag_id, from_id):
-        '''
-        if self.status == 'idle':
-            return
-        print('Node {} recieved stop({}, {})'.format(self.id, frag_id, from_id))
         p = self.port_to(from_id)
         if frag_id > self.coord_so_far:
             self.coord_so_far = frag_id
-            self.get_node(self.ports[self.port_to_coord]).stop(frag_id, from_id=self.id)
+            self._con.send(self._ports[self.port_to_coord], dict(type='stop', frag_id=self.id))
             self.port_to_coord = p
         if frag_id == self.coord_so_far:
             if self.port_to_coord not in self.get_port():
-                self.get_node(self.ports[self.port_to_coord]).no_contention(self.id)
+                self._con.send(self._ports[self.port_to_coord], dict(type='no_contention'))
                 self.recd_reply[self.port_to_coord] = 'no_contention'
             else:
-                self.get_node(self.ports[self.port_to_coord]).stop(frag_id, from_id=self.id)
+                self._con.send(self._ports[self.port_to_coord], dict(type='stop', frag_id=frag_id))
             self.port_to_coord = p
         if frag_id < self.coord_so_far:
-            self.get_node(self.ports[p]).stop(frag_id, from_id=self.id)
-        '''
+            self._con.send(self._ports[p], dict(type='stop', frag_id=frag_id))
+
 
     def _on_everybody_responded(self):
-        '''
         if 'accepted' in self.recd_reply.values():
-            self.get_node(self.ports[self.port_to_coord]).accepted(self.id)
+            self._con.send(self._ports[self.port_to_coord], dict(type='accepted'))
             if self.port_to_coord not in self.get_port():
                 self.assign_edge(self.port_to_coord)
         else:
             if (self.port_to_coord not in self.get_port()) and len(self.set_of_ports().difference([self.port_to_coord]).intersection(self.get_port()))!=0:
-                    self.get_node(self.ports[self.port_to_coord]).accepted(self.id)
+                    self._con.send(self._ports[self.port_to_coord], dict(type='accepted')).accepted(self.id)
                     self.assign_edge(self.port_to_coord)
             else:
-                self.get_node(self.ports[self.port_to_coord]).no_contention(self.id)
-        '''
+                self._con.send(self._ports[self.port_to_coord], dict(type='no_contention'))
+
         # Go back to the idle state
         self.recd_reply = {}
         self.status = 'idle'
@@ -240,17 +233,21 @@ class Node(threading.Thread):
                     time.sleep(2.0)
                     self._heartbeat()
                 elif msg['type'] == 'reconfig':
+                    self._expected_number_of_responses = len(self._ports) - 1
                     self._on_reconfig(msg['node_list'], msg['frag_id'], msg['id'])
                 elif msg['type'] == 'no_contention':
-                    self.recd_reply[self.port_to(msg['id'])] = 'no_contention'
-                    if len(self.recd_reply) == self._expected_number_of_responses:
-                        self._on_everybody_responded()
+                    if self.state == 'wait':
+                        self.recd_reply[self.port_to(msg['id'])] = 'no_contention'
+                        if len(self.recd_reply) == self._expected_number_of_responses:
+                            self._on_everybody_responded()
                 elif msg['type'] == 'accept':
-                    self.recd_reply[self.port_to(msg['id'])] = 'accepted'
-                    if len(self.recd_reply) == self._expected_number_of_responses:
-                        self._on_everybody_responded()
+                    if self.state == 'wait':
+                        self.recd_reply[self.port_to(msg['id'])] = 'accepted'
+                        if len(self.recd_reply) == self._expected_number_of_responses:
+                            self._on_everybody_responded()
                 elif msg['type'] == 'stop':
-                    self._on_stop(msg['frag_id'], msg['id'])
+                    if self.state == 'wait':
+                        self._on_stop(msg['frag_id'], msg['id'])
                 elif msg['type'] == 'fail':
                     self._expected_number_of_responses = len(self._ports)
                     # send reconfiguration request through all the ports
