@@ -57,6 +57,7 @@ class Receiver(threading.Thread):
 
             if msg['type'] == 'ping':
                 '''respond with pong'''
+                logging.debug('Reacting to heartbeat from {}'.format(msg['id']))
                 conn.sendall(_encode('{"type": "pong"}'))
                 conn.close()
             else:
@@ -71,34 +72,39 @@ class Sender(threading.Thread):
         self.setName('Sender')
         self._incoming = incoming
         self._outgoing = outgoing
-        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock = None
 
     def run(self):
         while True:
-            if not self._queue.empty():
+            if not self._outgoing.empty():
+                msg = self._outgoing.get()
+                logging.debug('msg: {}'.format(repr(msg)))
+                self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 try:
-                    msg = self._queue.get()
-                    logging.debug('msg: {}'.format(repr(msg)))
                     self._sock.connect((msg['host'], msg['port']))
                     self._sock.sendall(_encode(msg))
                 except ConnectionRefusedError:
-                    logging.debug('failure: {}'.format(msg['id']))
-                    failure_msg = dict(type="fail", id=msg['id'])
-                    self._incoming.put(failure_msg)
+                    if msg['type'] == 'ping':
+                        logging.debug('failure: {}'.format(msg['to_id']))
+                        failure_msg = dict(type="fail", id=msg['to_id'])
+                        self._incoming.put(failure_msg)
                 finally:
                     self._sock.close()
 
 
 class Communicator(object):
-    def __init__(self, net_config=None, incoming=None, outgoing=None):
+    def __init__(self, net_config=None, incoming=None, outgoing=None, id=None):
         self._config = net_config
         self._incoming = incoming
         self._outgoing = outgoing
+        self._id = id
 
     def send(self, id, msg):
         # translate id to addr:port and put in outgoing queue
         msg['host'] = self._config[id]['host']
         msg['port'] = self._config[id]['port']
+        msg['to_id'] = id
+        msg['id'] = self._id
         self._outgoing.put(msg)
 
     def ready(self):
@@ -124,14 +130,14 @@ class Node(threading.Thread):
         self.port_to_coord = None
         self.status = 'idle'
         self.recd_reply = {}
-
-        self._heartbeat_timer = threading.Timer(1.0, self._heartbeat)
         self._expected_number_of_responses = len(self._ports)
 
-    def _heart_beat(self):
-        for edge_id in self._edges:
-            logging.debug('sending heartbeat to {}'.format(edge_id))
-            self._con.send(_encode(dict(type="ping")))
+    def _heartbeat(self):
+        threading.Timer(1.0, self._heartbeat).start()
+        for port_id in self._edges:
+            node_id = self._ports[port_id]
+            logging.debug('sending heartbeat to {}'.format(node_id))
+            self._con.send(node_id, dict(type="ping"))
 
     def _on_reconfig(self, node_list, frag_id, from_id):
         '''
@@ -229,26 +235,26 @@ class Node(threading.Thread):
                 msg = incoming_queue.get()
                 logging.debug('Processing message: {}'.format(repr(msg)))
 
-                if msg.type == 'start':
-                    print('Activating')
-                    time.sleep(1.0)
-                    self._heartbeat_timer.start()
-                elif msg.type == 'reconfig':
-                    self._on_reconfig(msg.node_list, msg.frag_id, msg.id)
-                elif msg.type == 'no_contention':
-                    self.recd_reply[self.port_to(msg.id)] = 'no_contention'
+                if msg['type'] == 'start':
+                    print('Activating in a second')
+                    time.sleep(2.0)
+                    self._heartbeat()
+                elif msg['type'] == 'reconfig':
+                    self._on_reconfig(msg['node_list'], msg['frag_id'], msg['id'])
+                elif msg['type'] == 'no_contention':
+                    self.recd_reply[self.port_to(msg['id'])] = 'no_contention'
                     if len(self.recd_reply) == self._expected_number_of_responses:
                         self._on_everybody_responded()
-                elif msg.type == 'accept':
-                    self.recd_reply[self.port_to(msg.from_id)] = 'accepted'
+                elif msg['type'] == 'accept':
+                    self.recd_reply[self.port_to(msg['id'])] = 'accepted'
                     if len(self.recd_reply) == self._expected_number_of_responses:
                         self._on_everybody_responded()
-                elif msg.type == 'stop':
-                    self._on_stop(msg.frag_id, msg.id)
-                elif msg.type == 'fail':
+                elif msg['type'] == 'stop':
+                    self._on_stop(msg['frag_id'], msg['id'])
+                elif msg['type'] == 'fail':
                     self._expected_number_of_responses = len(self._ports)
                     # send reconfiguration request through all the ports
-                    for dest_id in self._ports.values():
+                    for dest_id in set(self._ports.values()).difference(msg['id']):
                         self._con.send(id=dest_id,
                                        msg=dict(type='reconfig',
                                                 node_list=[self.id],
@@ -294,12 +300,15 @@ if __name__ == '__main__':
 
     communicator = Communicator(net_config=net_config,
                                 incoming=incoming_queue,
-                                outgoing=outgoing_queue)
+                                outgoing=outgoing_queue,
+                                id=my_id)
 
     # thread to receive incoming messages
-    receiver = Receiver(host=host, port=port,
+    receiver = Receiver(host=host,
+                        port=port,
                         queue=incoming_queue)
-    sender = Sender(queue=outgoing_queue)
+    sender = Sender(incoming=incoming_queue,
+                    outgoing=outgoing_queue)
     node = Node(id=my_id,
                 links=links,
                 edges=edges,
