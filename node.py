@@ -9,7 +9,6 @@ import queue
 
 logging.basicConfig(level=logging.DEBUG, format='(%(threadName)-10s) %(message)s')
 
-
 def _encode(msg):
     '''Converts dictionary to binary coded json-string which can be send over the network'''
     json_str = json.dumps(msg)
@@ -27,7 +26,7 @@ def _decode(msg):
 
 
 class Receiver(threading.Thread):
-    '''1. Separate thread to open port to listen
+    '''Separate thread to open port to listen
        1. Recieves the message
        2. Decodes - messages are binary coded json strings, but we work with dictionaries
        3. If it is a heartbeat message - respnonds
@@ -37,6 +36,7 @@ class Receiver(threading.Thread):
     def __init__(self, host, port, queue):
         super().__init__()
         self.setName('Receiver')
+        # Queue for incoming messages
         self._queue = queue
 
         # Open a socket and bind to the port
@@ -49,6 +49,7 @@ class Receiver(threading.Thread):
             # recieve messages and put them into queue
             conn, addr = self._sock.accept()
             data = conn.recv(1024)
+
             msg = _decode(data)
             logging.debug('msg: {}'.format(repr(msg)))
 
@@ -56,16 +57,22 @@ class Receiver(threading.Thread):
                 continue
 
             if msg['type'] == 'ping':
-                '''respond with pong'''
+                # respond with pong to heartbeat messages
+                # no need to put it into queue
+                # TODO: Is this a potential problem???
                 logging.debug('Reacting to heartbeat from {}'.format(msg['id']))
                 conn.sendall(_encode('{"type": "pong"}'))
-                conn.close()
             else:
+                # TODO: Check if we actually need this information
                 msg['addr'] = addr
                 incoming_queue.put(msg)
+            conn.close()
 
 
 class Sender(threading.Thread):
+    '''Sender thread. Fetches messages from the outgoing queue and send them one by one.
+       Also initiates 'failure mode' if unable to send failure message.
+    '''
 
     def __init__(self, incoming=None, outgoing=None):
         super().__init__()
@@ -79,6 +86,7 @@ class Sender(threading.Thread):
             if not self._outgoing.empty():
                 msg = self._outgoing.get()
                 logging.debug('msg: {}'.format(repr(msg)))
+                # TODO: Is it possible to reuse the socket???
                 self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 try:
                     self._sock.connect((msg['host'], msg['port']))
@@ -93,7 +101,9 @@ class Sender(threading.Thread):
 
 
 class Communicator(object):
+    '''Proxy class. Translates network-wide ids to actual ip-addresses and ports'''
     def __init__(self, net_config=None, incoming=None, outgoing=None, id=None):
+        # network configuration as a dictionary node_id -> ('port', 'host')
         self._config = net_config
         self._incoming = incoming
         self._outgoing = outgoing
@@ -103,44 +113,58 @@ class Communicator(object):
         # translate id to addr:port and put in outgoing queue
         msg['host'] = self._config[id]['host']
         msg['port'] = self._config[id]['port']
+
+        # add to_id and from_id to the message
         msg['to_id'] = id
         msg['id'] = self._id
+
+        # schedule message for sending
         self._outgoing.put(msg)
 
     def ready(self):
+        # check if queue contains any messages
         return not self._incoming.empty()
 
     def receive(self):
-        msg = self._incoming.get()
-        return msg
+        # get message from incoming queue, one at the time
+        # TODO: Should postprocess messages??
+        return self._incoming.get()
 
 
 class Node(threading.Thread):
     '''Implements main reconfiguration functionality'''
+
     def __init__(self, id, links, edges, communicator):
         super().__init__()
         self.setName('Node')
+
         self.id = id
+
+        # hardware link id -> networkwide logical node id
         self._ports = {i: nb_id for i, nb_id in enumerate(links)}
         self._edges = [self.port_to(edge) for edge in edges]
         self._con = communicator
 
-        # State variables
+        # state variables
         self.coord_so_far = None
         self.port_to_coord = None
         self.status = 'idle'
         self.recd_reply = {}
 
+        # TODO: Should be done in different way
         self._expected_number_of_responses = len(self._ports)
 
     def _heartbeat(self):
+        # TODO: Is it possible to reuse time thread???
         threading.Timer(1.0, self._heartbeat).start()
+
         for port_id in self._edges:
             node_id = self._ports[port_id]
             logging.debug('sending heartbeat to {}'.format(node_id))
             self._con.send(node_id, dict(type="ping"))
 
     def _on_reconfig(self, node_list, frag_id, from_id):
+        # TODO: Check this method
         sender_id = node_list[-1]
         if self.status == 'idle':
             if len(self._ports) == 1:
@@ -173,6 +197,7 @@ class Node(threading.Thread):
                 self.port_to_coord = self.port_to(sender_id)
 
     def _on_stop(self, frag_id, from_id):
+        # TODO: Check this method
         p = self.port_to(from_id)
         if frag_id > self.coord_so_far:
             self.coord_so_far = frag_id
@@ -190,6 +215,7 @@ class Node(threading.Thread):
 
 
     def _on_everybody_responded(self):
+        # TODO: Check this method
         if 'accepted' in self.recd_reply.values():
             self._con.send(self._ports[self.port_to_coord], dict(type='accepted'))
             if self.port_to_coord not in self.get_port():
