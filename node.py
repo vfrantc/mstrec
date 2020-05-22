@@ -247,13 +247,19 @@ class Node(threading.Thread):
 
     def assign_edge(self, port_id):
         logging.debug('Assign new edge to port: {}')
+        logging.debug('Edges before: {}'.format(repr(self._edges)))
         self._edges.append(port_id)
+        logging.debug('Edges after: {}'.format(repr(self._edges)))
+
 
     def remove_edge(self, node_id):
         port_id = self.port_to(node_id)
+        logging.debug('Removing edge to node {} (port {})'.format(node_id, port_id))
+        logging.debug('Edges before: {}'.format(repr(self._edges)))
         if port_id in self._edges:
             logging.debug('Removing edge to node {} (port {})'.format(node_id, port_id))
             self._edges = list(set(self._edges).difference([port_id]))
+        logging.debug('Edges after: {}'.format(repr(self._edges)))
 
 
     def get_port(self):
