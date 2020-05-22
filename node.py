@@ -7,6 +7,9 @@ import threading
 import logging
 import queue
 
+# TODO: add protocol to collect current configuration from all the nodes
+# TODO: add functionality to save graph as an image
+
 logging.basicConfig(level=logging.DEBUG, format='(%(threadName)-10s) %(message)s')
 
 def _encode(msg):
@@ -156,7 +159,7 @@ class Node(threading.Thread):
 
     def _heartbeat(self):
         # TODO: Is it possible to reuse time thread???
-        threading.Timer(1.0, self._heartbeat).start()
+        threading.Timer(10.0, self._heartbeat).start()
 
         for port_id in self._edges:
             node_id = self._ports[port_id]
@@ -243,7 +246,15 @@ class Node(threading.Thread):
         return set(self._ports.keys())
 
     def assign_edge(self, port_id):
+        logging.debug('Assign new edge to port: {}')
         self._edges.append(port_id)
+
+    def remove_edge(self, node_id):
+        port_id = self.port_to(node_id)
+        if port_id in self._edges:
+            logging.debug('Removing edge to node {} (port {})'.format(node_id, port_id))
+            self._edges = list(set(self._edges).difference([port_id]))
+
 
     def get_port(self):
         return self._edges
@@ -276,6 +287,7 @@ class Node(threading.Thread):
                         self._on_stop(msg['frag_id'], msg['id'])
                 elif msg['type'] == 'fail':
                     self._expected_number_of_responses = len(self._ports)
+                    self.remove_edge(msg['id'])
                     # send reconfiguration request through all the ports
                     for dest_id in set(self._ports.values()).difference(msg['id']):
                         self._con.send(id=dest_id,
