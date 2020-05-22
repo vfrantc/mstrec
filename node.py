@@ -185,10 +185,10 @@ class Node(threading.Thread):
                 self._con.send(sender_id, dict(type='stop', frag_id=self.coord_so_far))
             else:
                 logging.debug('This node is the slave: change coord_so_far!!')
-                logging.debug('self._ports: {}'.format(repr(self.ports)))
+                logging.debug('self._ports: {}'.format(repr(self._ports)))
                 logging.debug('self.port_to_coord: {}'.format(self.port_to_coord))
                 self.coord_so_far = frag_id
-                self._con.send(self.port_to_coord, dict(type='stop', frag_id=frag_id))
+                self._con.send(self._ports[self.port_to_coord], dict(type='stop', frag_id=frag_id))
                 self.port_to_coord = self.port_to(sender_id)
 
     def _on_stop(self, frag_id, from_id):
