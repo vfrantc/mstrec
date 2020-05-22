@@ -48,20 +48,15 @@ class Server(threading.Thread):
                 return False
 
 
-
-def as_nx(id_table, edges=False):
+def as_nx(id_table):
     '''Convert to networkx graph.
        By default saves links'''
     graph = nx.Graph()
     graph.add_nodes_from(id_table.keys())
     for idx, node in id_table.items():
-        if edges:
-            for edge_id in node.edges:
-                print('add edge: {} - {}'.format(node.id, node.ports[edge_id]))
-                graph.add_edge(node.id, node.ports[edge_id])
-        else:
-            for neighbour in node.ports.values():
-                graph.add_edge(node.id, neighbour)
+        for edge_id in node['edges']:
+            graph.add_edge(node['id'], edge_id)
+
     return graph
 
 
@@ -98,12 +93,13 @@ if __name__ == '__main__':
     # wait for server here
     server.join()
 
+    id_table = dict()
     while not server.responses.empty():
         resp = server.responses.get()
         print(repr(resp))
+        id_table[resp['id']] = resp
 
-    # server.responses.get()
-    # graph = as_nx(id_table, edges=True)
-    # nx.draw(graph, with_labels=True)
-    # plt.draw()
-    # plt.show()
+    graph = as_nx(id_table)
+    nx.draw(graph, with_labels=True)
+    plt.draw()
+    plt.show()
