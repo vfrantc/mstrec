@@ -10,6 +10,7 @@ logging.basicConfig(level=logging.DEBUG, format='(%(threadName)-10s) %(message)s
 from common import encode
 from common import decode
 from common import load_config
+from common import send_msg
 
 
 class Receiver(threading.Thread):
@@ -35,6 +36,7 @@ class Receiver(threading.Thread):
         while True:
             # recieve messages and put them into queue
             conn, addr = self._sock.accept()
+            conn.settimeout(1)
             data = conn.recv(1024)
 
             msg = decode(data)
@@ -292,6 +294,15 @@ class Node(threading.Thread):
                                        msg=dict(type='reconfig',
                                                 node_list=[self.id],
                                                 frag_id=self.id))
+                elif msg['type'] == 'extract':
+                    # TODO: Not a good idea to send in this thread
+                    host = msg['host']
+                    port = msg['port']
+                    graph_msg = encode(dict(id=self.id,
+                                            links=list(self._ports.values()),
+                                            edges=[self._ports[port_id] for port_id in self._edges]))
+
+                    send_msg(msg=graph_msg, host=host, port=port)
 
 
 def opt_parser():

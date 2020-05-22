@@ -1,5 +1,6 @@
 import json
 import socket
+import logging
 
 
 def encode(msg):
@@ -29,6 +30,6 @@ def send_msg(msg, host, port):
         sock.connect((host, port))
         sock.sendall(msg)
     except ConnectionRefusedError:
-        pass
+        logging.debug('ConnectionRefusedError')
     finally:
         sock.close()
