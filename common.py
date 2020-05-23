@@ -21,7 +21,11 @@ def decode(msg):
 
 def load_config(fname):
     with open(fname, 'r') as fd:
-        return json.load(fd)
+        cfg = json.load(fd)
+        icfg = dict()
+        for key, item in cfg.items():
+            icfg[int(key)] = item
+        return icfg
 
 
 def send_msg(msg, host, port):

@@ -213,6 +213,7 @@ class Node(threading.Thread):
 
     def _on_everybody_responded(self):
         logging.debug('Everybody responded was actually called!!')
+        logging.debug('Everybody responded: self.port_to_coord {} {}'.format(self.port_to_coord, self.status))
         # TODO: Check this method
         if 'accepted' in self.recd_reply.values():
             self._con.send(self._ports[self.port_to_coord], dict(type='accepted'))
@@ -235,6 +236,7 @@ class Node(threading.Thread):
         for port_idx, cur_id in self._ports.items():
             if cur_id == node_id:
                 return port_idx
+        logging.debug('='*1000)
         return None
 
     def set_of_ports(self):
@@ -271,31 +273,28 @@ class Node(threading.Thread):
                     self._heartbeat()
                 elif msg['type'] == 'reconfig':
                     self._expected_number_of_responses = len(self._ports) - 1
-                    self._on_reconfig(msg['node_list'], msg['frag_id'], msg['id'])
+                    self._on_reconfig(msg['node_list'], int(msg['frag_id']), int(msg['id']))
                 elif msg['type'] == 'no_contention':
-                    if self.status == 'wait':
-                        self.recd_reply[self.port_to(msg['id'])] = 'no_contention'
-                        if len(self.recd_reply) == self._expected_number_of_responses:
-                            self._on_everybody_responded()
+                    self.recd_reply[self.port_to(int(msg['id']))] = 'no_contention'
+                    if len(self.recd_reply) == self._expected_number_of_responses:
+                        self._on_everybody_responded()
                 elif msg['type'] == 'accept':
-                    if self.status == 'wait':
-                        self.recd_reply[self.port_to(msg['id'])] = 'accepted'
-                        if len(self.recd_reply) == self._expected_number_of_responses:
-                            self._on_everybody_responded()
+                    self.recd_reply[self.port_to(int(msg['id']))] = 'accepted'
+                    if len(self.recd_reply) == self._expected_number_of_responses:
+                        self._on_everybody_responded()
                 elif msg['type'] == 'stop':
-                    if self.status == 'wait':
-                        self._on_stop(msg['frag_id'], msg['id'])
+                    self._on_stop(int(msg['frag_id']), int(msg['id']))
                 elif msg['type'] == 'fail':
                     self._expected_number_of_responses = len(self._ports)
-                    self.remove_edge(msg['id'])
+                    self.remove_edge(int(msg['id']))
                     # send reconfiguration request through all the ports
-                    for dest_id in set(self._ports.values()).difference(msg['id']):
+                    for dest_id in set(self._ports.values()).difference([int(msg['id'])]):
                         self._con.send(id=dest_id,
                                        msg=dict(type='reconfig',
                                                 node_list=[self.id],
                                                 frag_id=self.id))
                 elif msg['type'] == 'extract':
-                    # TODO: Not a good idea to send in this thread
+                    # TODO: Not a good idea to send in this thread. But it works.
                     host = msg['host']
                     port = msg['port']
                     graph_msg = encode(dict(id=self.id,
@@ -308,8 +307,8 @@ class Node(threading.Thread):
 def opt_parser():
     parser = argparse.ArgumentParser(description='Network reconfiguration node')
     parser.add_argument('--id',
-                        default="0",
-                        type=str)
+                        default=3,
+                        type=int)
     parser.add_argument('--wait',
                         default=10,
                         type=int,
