@@ -9,7 +9,7 @@ from common import send_msg
 
 def opt_parser():
     parser = argparse.ArgumentParser(description='Network reconfiguration node')
-    parser.add_argument('--net_config', default='config/sample_graph2.json', type=str)
+    parser.add_argument('--net_config', default='config/sample_graph.json', type=str)
     return parser
 
 

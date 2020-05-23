@@ -116,7 +116,6 @@ class Communicator(object):
 
     def receive(self):
         # get message from incoming queue, one at the time
-        # TODO: Should postprocess messages??
         return self._incoming.get()
 
 
@@ -140,11 +139,7 @@ class Node(threading.Thread):
         self.status = 'idle'
         self.recd_reply = {}
 
-        # TODO: Should be done in different way
-        self._expected_number_of_responses = len(self._ports)
-
     def _heartbeat(self):
-        # TODO: Is it possible to reuse time thread???
         threading.Timer(10.0, self._heartbeat).start()
 
         for port_id in self._edges:
@@ -272,15 +267,15 @@ class Node(threading.Thread):
                     time.sleep(2.0)
                     self._heartbeat()
                 elif msg['type'] == 'reconfig':
-                    self._expected_number_of_responses = len(self._ports) - 1
+                    self.recd_reply[self.port_to(int(msg['id']))] = 'no_contention'
                     self._on_reconfig(msg['node_list'], int(msg['frag_id']), int(msg['id']))
                 elif msg['type'] == 'no_contention':
                     self.recd_reply[self.port_to(int(msg['id']))] = 'no_contention'
-                    if len(self.recd_reply) == self._expected_number_of_responses:
+                    if len(self.recd_reply) == len(self._ports):
                         self._on_everybody_responded()
                 elif msg['type'] == 'accept':
                     self.recd_reply[self.port_to(int(msg['id']))] = 'accepted'
-                    if len(self.recd_reply) == self._expected_number_of_responses:
+                    if len(self.recd_reply) == len(self._ports):
                         self._on_everybody_responded()
                 elif msg['type'] == 'stop':
                     self._on_stop(int(msg['frag_id']), int(msg['id']))
@@ -294,7 +289,6 @@ class Node(threading.Thread):
                                                 node_list=[self.id],
                                                 frag_id=self.id))
                 elif msg['type'] == 'extract':
-                    # TODO: Not a good idea to send in this thread. But it works.
                     host = msg['host']
                     port = msg['port']
                     graph_msg = encode(dict(id=self.id,
@@ -307,13 +301,13 @@ class Node(threading.Thread):
 def opt_parser():
     parser = argparse.ArgumentParser(description='Network reconfiguration node')
     parser.add_argument('--id',
-                        default=3,
+                        default=10,
                         type=int)
     parser.add_argument('--wait',
                         default=10,
                         type=int,
                         help='Time to wait before we start to send heartbit')
-    parser.add_argument('--net_config', default='config/sample_graph2.json', type=str)
+    parser.add_argument('--net_config', default='config/sample_graph.json', type=str)
     return parser
 
 if __name__ == '__main__':
