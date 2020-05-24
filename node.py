@@ -283,14 +283,13 @@ class Node(threading.Thread):
                     if self.status == 'wait':
                         self._on_stop(int(msg['frag_id']), int(msg['id']))
                 elif msg['type'] == 'fail':
-                    if self.status == 'idle':
-                        self.remove_edge(int(msg['id']))
-                        # send reconfiguration request through all the ports
-                        for dest_id in set(self._ports.values()).difference([int(msg['id'])]):
-                            self._con.send(id=dest_id,
-                                           msg=dict(type='reconfig',
-                                                    node_list=[self.id],
-                                                    frag_id=self.id))
+                    self.remove_edge(int(msg['id']))
+                    # send reconfiguration request through all the ports
+                    for dest_id in set(self._ports.values()).difference([int(msg['id'])]):
+                        self._con.send(id=dest_id,
+                                       msg=dict(type='reconfig',
+                                                node_list=[self.id],
+                                                frag_id=self.id))
                 elif msg['type'] == 'extract':
                     host = msg['host']
                     port = msg['port']
@@ -304,13 +303,13 @@ class Node(threading.Thread):
 def opt_parser():
     parser = argparse.ArgumentParser(description='Network reconfiguration node')
     parser.add_argument('--id',
-                        default=10,
+                        default=11,
                         type=int)
     parser.add_argument('--wait',
-                        default=10,
+                        default=11,
                         type=int,
                         help='Time to wait before we start to send heartbit')
-    parser.add_argument('--net_config', default='config/sample_graph.json', type=str)
+    parser.add_argument('--net_config', default='config/sample_graph2.json', type=str)
     return parser
 
 if __name__ == '__main__':
