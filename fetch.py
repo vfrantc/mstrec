@@ -21,12 +21,13 @@ class Server(threading.Thread):
         self._port = port
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        #self._sock.setblocking(False)
         self._sock.bind((self._host, self._port))
         self.size = size
         self.responses = Queue()
 
     def run(self):
-        self._sock.listen(5)
+        self._sock.listen(11)
         while True:
             # if got all the responses
             # TODO: This is a problem
@@ -62,7 +63,7 @@ def as_nx(id_table):
 
 def opt_parser():
     parser = argparse.ArgumentParser(description='Network reconfiguration node')
-    parser.add_argument('--net_config', default='config/sample_graph2.json', type=str)
+    parser.add_argument('--net_config', default='config/sample_graph.json', type=str)
     parser.add_argument('--host', default='127.0.0.1', type=str)
     parser.add_argument('--port', default=3333, type=int)
     return parser

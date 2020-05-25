@@ -309,7 +309,7 @@ def opt_parser():
                         default=11,
                         type=int,
                         help='Time to wait before we start to send heartbit')
-    parser.add_argument('--net_config', default='config/sample_graph2.json', type=str)
+    parser.add_argument('--net_config', default='config/sample_graph.json', type=str)
     return parser
 
 if __name__ == '__main__':
