@@ -48,12 +48,9 @@ class Receiver(threading.Thread):
             if msg['type'] == 'ping':
                 # respond with pong to heartbeat messages
                 # no need to put it into queue
-                # TODO: Is this a potential problem???
                 logging.debug('Reacting to heartbeat from {}'.format(msg['id']))
                 conn.sendall(encode('{"type": "pong"}'))
             else:
-                # TODO: Check if we actually need this information
-                msg['addr'] = addr
                 incoming_queue.put(msg)
             conn.close()
 
@@ -151,8 +148,8 @@ class Node(threading.Thread):
         sender_id = node_list[-1]
         if self.status == 'idle':
             logging.debug('Reconfig, was in idle state!!')
+            # TODO: This is wrong. Should check not the number of ports, but 'available' ports. But this probably not the problem.
             if len(self._ports) == 1:
-                # TODO: This is wrong. Should check not the number of ports, but 'available' ports. But this probably not the problem.
                 self._con.send(sender_id, dict(type='no_contention'))
             self.coord_so_far = frag_id
             self.status = 'wait'
@@ -215,7 +212,6 @@ class Node(threading.Thread):
         else:
             # TODO: There might be an issue here
             if (self.port_to_coord not in self.get_port()) and len(self.set_of_ports().difference([self.port_to_coord]).intersection(self.get_port()))!=0:
-                    print('!'*100)
                     self._con.send(self._ports[self.port_to_coord], dict(type='accepted'))
                     self.assign_edge(self.port_to_coord)
             else:
@@ -231,7 +227,6 @@ class Node(threading.Thread):
         for port_idx, cur_id in self._ports.items():
             if cur_id == node_id:
                 return port_idx
-        logging.debug('='*1000)
         return None
 
     def set_of_ports(self):
@@ -283,6 +278,13 @@ class Node(threading.Thread):
                     if self.status == 'wait':
                         self._on_stop(int(msg['frag_id']), int(msg['id']))
                 elif msg['type'] == 'fail':
+                    # set status of the node
+                    # TODO: This might be an issue
+                    self.status = 'wait'
+                    self.coord_so_far = self.id
+                    self.port_to_coord = None # What to put here???
+
+                    # remove the failed edge from our MST
                     self.remove_edge(int(msg['id']))
                     # send reconfiguration request through all the ports
                     for dest_id in set(self._ports.values()).difference([int(msg['id'])]):
