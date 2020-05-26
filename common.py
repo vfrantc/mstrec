@@ -37,3 +37,10 @@ def send_msg(msg, host, port):
         logging.debug('ConnectionRefusedError')
     finally:
         sock.close()
+
+
+def there_is_a_none(d):
+    for item in d.items():
+        if item is None:
+            return True
+    return False
