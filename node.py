@@ -41,7 +41,8 @@ class Receiver(threading.Thread):
             data = conn.recv(1024)
 
             msg = decode(data)
-            #logging.debug('msg: {}'.format(repr(msg)))
+            if msg['type'] not in ['ping', 'start']:
+                logging.debug(repr(msg))
 
             if not msg:
                 continue
@@ -49,7 +50,6 @@ class Receiver(threading.Thread):
             if msg['type'] == 'ping':
                 # respond with pong to heartbeat messages
                 # no need to put it into queue
-                #logging.debug('Reacting to heartbeat from {}'.format(msg['id']))
                 conn.sendall(encode('{"type": "pong"}'))
             else:
                 incoming_queue.put(msg)
@@ -72,6 +72,8 @@ class Sender(threading.Thread):
         while True:
             if not self._outgoing.empty():
                 msg = self._outgoing.get()
+                if msg['type'] not in ['ping', 'start']:
+                    logging.debug(repr(msg))
                 self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 try:
                     self._sock.connect((msg['host'], msg['port']))
@@ -130,7 +132,7 @@ class Node(threading.Thread):
         self._con = communicator
 
         # state variables
-        self.coord_so_far = None
+        self.coord_so_far = self.id
         self.port_to_coord = None
         self.status = 'idle'
         self.recd_reply = {}
@@ -154,6 +156,7 @@ class Node(threading.Thread):
         return set(self._ports.keys())
 
     def assign_edge(self, port_id):
+        logging.debug('Assing edge: {}'.format(port_id))
         self._edges.append(port_id)
 
     def remove_edge(self, node_id):
@@ -166,26 +169,30 @@ class Node(threading.Thread):
 
     def _on_everybody_responded(self):
         responses = list(self.recd_reply.values())
-        if 'accept' in responses:
-            self._con.send(self._ports[self.port_to_coord],
-                           dict(type='accepted'))
-        else:
+        if 'accepted' in responses:
             if self.port_to_coord is not None:
-                self._con.send(self.coord_so_far, dict(type='no_contention'))
+                self._con.send(self._ports[self.port_to_coord], dict(type='accepted'))
+            if self.port_to_coord not in self.get_port():
+                if self.port_to_coord is not None:
+                    self.assign_edge(self.port_to_coord)
+        else:
+            if (self.port_to_coord not in self.get_port()) and len(self.set_of_ports().difference([self.port_to_coord]).intersection(self.get_port())) != 0:
+                if self.port_to_coord is not None:
+                    self._con.send(self._ports[self.port_to_coord], dict(type='accepted'))
+                if self.port_to_coord is not None:
+                    self.assign_edge(self.port_to_coord)
+            else:
+                if self.port_to_coord is not None:
+                    self._con.send(self._ports[self.port_to_coord], dict(type='no_contention'))
+
+        logging.debug('Goes idle')
+        self.status = 'idle'
+        self.recd_reply = {}
 
     def run(self):
         while True:
             if not incoming_queue.empty():
                 msg = incoming_queue.get()
-                logging.debug('Processing message: {}\n'
-                              'Current recvd: {}\n'
-                              'Current status: {}\n'
-                              'Coord so far: {}\n'
-                              'Port to coord: {}'.format(repr(msg),
-                                                         self.recd_reply,
-                                                         self.status,
-                                                         self.coord_so_far,
-                                                         self.port_to_coord))
                 if msg['type'] == 'start':
                     time.sleep(2.0)
                     self._heartbeat()
@@ -220,15 +227,17 @@ class Node(threading.Thread):
                         # Detected loop
                         if self.id in msg['node_list']:
                             logging.debug('Loop is detected')
-                            self._con.send(self._port[e], dict(type='no_contention'))
+                            self._con.send(self._ports[e], dict(type='no_contention'))
                             continue
 
                         # Resolve contention
                         if (self.coord_so_far > frag_id) or ((self.coord_so_far == frag_id) and (self.id > sender_id)):
+                            logging.debug('Sending out stop message')
                             self._con.send(sender_id, dict(type='stop', frag_id=self.coord_so_far))
                         else:
                             self.coord_so_far = frag_id
                             if self.port_to_coord is not None:
+                                logging.debug('Sending out stop message')
                                 self._con.send(self._ports[self.port_to_coord], dict(type='stop', frag_id=frag_id))
                             self.port_to_coord = self.port_to(sender_id)
                 elif msg['type'] == 'no_contention':
@@ -237,14 +246,33 @@ class Node(threading.Thread):
                         self.recd_reply[sender_id] = 'no_contention'
                     if not there_is_a_none(self.recd_reply):
                         self._on_everybody_responded()
-                elif msg['type'] == 'accept':
+                elif msg['type'] == 'accepted':
                     sender_id = int(msg['id'])
                     if sender_id in self.recd_reply.keys():
-                        self.recd_reply[sender_id] = 'accept'
+                        self.recd_reply[sender_id] = 'accepted'
                     if not there_is_a_none(self.recd_reply):
                         self._on_everybody_responded()
                 elif msg['type'] == 'stop':
-                    pass
+                    frag_id = msg['frag_id']
+                    from_id = msg['id']
+                    p = self.port_to(from_id)
+                    if frag_id > self.coord_so_far:
+                        self.coord_so_far = frag_id
+                        if self.port_to_coord is not None:
+                            self._con.send(self._ports[self.port_to_coord], dict(type='stop', frag_id=frag_id))
+                        self.port_to_coord = p
+                    if frag_id == self.coord_so_far:
+                        if self.port_to_coord not in self.get_port():
+                            if self.port_to_coord is not None:
+                                self._con.send(self._ports[self.port_to_coord], dict(type='no_contention'))
+                            self.recd_reply[self.port_to_coord] = 'no_contention'
+                            if not there_is_a_none(self.recd_reply):
+                                self._on_everybody_responded()
+                        else:
+                            self._con.send(self._ports[self.port_to_coord], dict(type='stop', frag_id=frag_id))
+                        self.port_to_coord = p
+                    if frag_id < self.coord_so_far:
+                        self._con.send(self._ports[p], dict(type='stop', frag_id=self.coord_so_far))
                 elif msg['type'] == 'fail':
                     failed_node = int(msg['id'])
                     self.remove_edge(failed_node)
@@ -267,7 +295,7 @@ class Node(threading.Thread):
 def opt_parser():
     parser = argparse.ArgumentParser(description='Network reconfiguration node')
     parser.add_argument('--id',
-                        default=10,
+                        default=15,
                         type=int)
     parser.add_argument('--net_config', default='config/sample_graph3.json', type=str)
     return parser
@@ -281,7 +309,6 @@ if __name__ == '__main__':
     net_config = load_config(opt.net_config)
 
     # Get configuration of this node
-    print(net_config[opt.id])
     my_id = opt.id
     host = net_config[my_id]['host']
     port = net_config[my_id]['port']
